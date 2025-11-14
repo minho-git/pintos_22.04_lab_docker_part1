@@ -160,8 +160,7 @@ error:
 
 /* Switch the current execution context to the f_name.
  * Returns -1 on fail. */
-int
-process_exec (void *f_name) {
+int process_exec (void *f_name) {
 	char *file_name = f_name;
 	bool success;
 
@@ -320,14 +319,52 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
  * Stores the executable's entry point into *RIP
  * and its initial stack pointer into *RSP.
  * Returns true if successful, false otherwise. */
-static bool
-load (const char *file_name, struct intr_frame *if_) {
+static bool load (const char *cmd_line, struct intr_frame *if_) {
 	struct thread *t = thread_current ();
 	struct ELF ehdr;
 	struct file *file = NULL;
 	off_t file_ofs;
 	bool success = false;
 	int i;
+	
+
+
+	// ============================================================================================================
+
+	char *file_name;
+	char *copy_cmd_line;
+	char *token; // 현재 찾은 단어
+	int count = 0;
+	char *save_ptr;
+
+	// 스택 포인터 배열
+	char *address[64];
+
+	// 원본을 수정X -> 복사본 만들기.
+	copy_cmd_line = palloc_get_page (0);
+	if (copy_cmd_line == NULL)
+		goto done; 
+	strlcpy (copy_cmd_line, cmd_line, PGSIZE);
+
+
+	token = __strtok_r(copy_cmd_line, " ", &save_ptr); 
+	file_name = token;
+
+	if (file_name == NULL) {
+		goto done;
+	}
+	// check
+	while (token != NULL && count < 64) {
+		if_->rsp -= (strlen(token) + 1);
+		memcpy(if_->rsp, token, strlen(token) + 1); // 캐스팅 안해도되나?
+
+		address[count++] = if_->rsp;
+		token = __strtok_r(NULL, " ", &save_ptr);
+	}
+
+
+	
+	// ============================================================================================================
 
 	/* Allocate and activate page directory. */
 	t->pml4 = pml4_create ();
@@ -414,12 +451,40 @@ load (const char *file_name, struct intr_frame *if_) {
 	/* Start address. */
 	if_->rip = ehdr.e_entry;
 
-	/* TODO: Your code goes here.
-	 * TODO: Implement argument passing (see project2/argument_passing.html). */
+	// ============================================================================================================
+
+
+	// 쓰레기 값 없애고 NULL 처리
+	address[count] = NULL;
+
+	// 8바이트 정렬하기
+	if_->rsp = if_->rsp & ~0x7;
+
+
+	// 스택에 배열 넣기 // 작은 주소부터 큰 주소로 쓰인다.
+	for (int i = count; i >= 0; i--) {
+		if_->rsp -= sizeof(address[i]);
+		// memcpy(pre, address[i], sizeof(address[i]));
+		*((char **)(if_->rsp)) = address[i];  // 이중 포인터 꼭 써야함.
+	}
+
+		// 레지스터 설정하기
+	if_->R.rdi = count;
+	if_->R.rsi = if_->rsp;
+
+	if_->rsp -= sizeof(char *);
+	*((char **)(if_->rsp)) = 0;
+
+	 // ============================================================================================================
 
 	success = true;
 
+
 done:
+
+	if (copy_cmd_line != NULL) {
+		palloc_free_page(copy_cmd_line);
+	}
 	/* We arrive here whether the load is successful or not. */
 	file_close (file);
 	return success;
