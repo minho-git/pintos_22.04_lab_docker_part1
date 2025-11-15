@@ -1,6 +1,13 @@
 {
     "files.associations": {
         "interrupt.h": "c",
-        "thread.h": "c"
+        "thread.h": "c",
+        "*.inc": "c",
+        "exception": "c",
+        "memory_resource": "c",
+        "iosfwd": "c",
+        "new": "c",
+        "ostream": "c",
+        "streambuf": "c"
     }
 }

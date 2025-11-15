@@ -27,10 +27,13 @@ static bool load (const char *file_name, struct intr_frame *if_);
 static void initd (void *f_name);
 static void __do_fork (void *);
 
+struct semaphore sema;
+
 /* General process initializer for initd and other process. */
 static void
 process_init (void) {
 	struct thread *current = thread_current ();
+	sema_init(&sema, 0);
 }
 
 /* Starts the first userland program, called "initd", loaded from FILE_NAME.
@@ -203,6 +206,10 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
+	 
+	sema_down(&sema);
+
+
 	return -1;
 }
 
@@ -214,6 +221,8 @@ process_exit (void) {
 	 * TODO: Implement process termination message (see
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
+
+	sema_up(&sema);
 
 	process_cleanup ();
 }
@@ -340,27 +349,22 @@ static bool load (const char *cmd_line, struct intr_frame *if_) {
 	// 스택 포인터 배열
 	char *address[64];
 
+	printf("debugging %s\n",cmd_line);
+
 	// 원본을 수정X -> 복사본 만들기.
 	copy_cmd_line = palloc_get_page (0);
 	if (copy_cmd_line == NULL)
 		goto done; 
 	strlcpy (copy_cmd_line, cmd_line, PGSIZE);
 
-
-	token = __strtok_r(copy_cmd_line, " ", &save_ptr); 
+	printf("debugging %s\n",copy_cmd_line);
+	token = strtok_r(copy_cmd_line, " ", &save_ptr); 
 	file_name = token;
 
 	if (file_name == NULL) {
 		goto done;
 	}
-	// check
-	while (token != NULL && count < 64) {
-		if_->rsp -= (strlen(token) + 1);
-		memcpy(if_->rsp, token, strlen(token) + 1); // 캐스팅 안해도되나?
 
-		address[count++] = if_->rsp;
-		token = __strtok_r(NULL, " ", &save_ptr);
-	}
 
 
 	
@@ -454,10 +458,19 @@ static bool load (const char *cmd_line, struct intr_frame *if_) {
 	// ============================================================================================================
 
 
+	// check
+	while (token != NULL && count < 64) {
+		if_->rsp -= (strlen(token) + 1);
+		memcpy(if_->rsp, token, strlen(token) + 1); // 캐스팅 안해도되나?
+	
+		address[count++] = if_->rsp;
+		token = strtok_r(NULL, " ", &save_ptr);
+	}
+
 	// 쓰레기 값 없애고 NULL 처리
 	address[count] = NULL;
-
-	// 8바이트 정렬하기
+	
+	//8바이트 정렬하기
 	if_->rsp = if_->rsp & ~0x7;
 
 

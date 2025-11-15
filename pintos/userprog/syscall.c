@@ -10,6 +10,11 @@
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
+// void halt(void);
+// void exit(int );
+// pid_t fork (const char *);
+// int wait (pid_t);
+int write2 (int fd, const void *buffer, unsigned size);
 
 /* System call.
  *
@@ -38,9 +43,55 @@ syscall_init (void) {
 }
 
 /* The main system call interface */
-void
-syscall_handler (struct intr_frame *f UNUSED) {
-	// TODO: Your implementation goes here.
-	printf ("system call!\n");
-	thread_exit ();
+void syscall_handler (struct intr_frame *f UNUSED) {
+
+	int status = f->R.rax;
+	
+	switch (status) {
+		case SYS_WRITE:
+			size_t num = write2(f->R.rdi, (void *)f->R.rsi, f->R.rdx);
+			f->R.rax = num;
+			break;
+		
+		case SYS_EXIT:
+			thread_exit();
+		default:
+			break;
+	}
+
+
+
+	// printf ("system call!\n");
+	// thread_exit ();
 }
+
+
+
+
+int write2 (int fd, const void *buffer, unsigned size) {
+
+	if (size == 0) {
+		return -1;
+	}
+
+	if (fd == 1) {
+		putbuf(buffer, size);
+	}
+
+	return size;
+}
+
+// void halt(void) {
+
+// 	power_off();
+// }
+
+// void exit(int status) {
+
+// 	// 현재 사용자 프로그램을 종료하고, 커널에 status를 반환합니다. 
+// 	// 만약 프로세스의 부모가 이 프로세스를 wait한다면(아래 참조), 이 값이 반환될 상태 값입니다. 
+// 	// 관례적으로 status가 0이면 성공을, 0이 아닌 값은 오류를 나타냅니다.
+
+
+// 	return status;
+// }
