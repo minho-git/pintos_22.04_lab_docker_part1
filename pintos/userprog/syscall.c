@@ -10,7 +10,7 @@
 #include "threads/synch.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
-#include "process.h"
+#include "userprog/process.h";
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -23,7 +23,7 @@ void check_valid_address(char *address);
 void sys_close (int fd);
 int sys_read (int fd, void *buffer, unsigned size);
 int sys_filesize (int fd);
-pid_t sys_fork (const char *thread_name);
+tid_t sys_fork (const char *thread_name, struct intr_frame *f);
 // int exec (const char *cmd_line);
 // pid_t fork (const char *);
 // int wait (pid_t);
@@ -172,10 +172,16 @@ void syscall_handler (struct intr_frame *f UNUSED) {
 			
 		case SYS_FORK: {
 			char *thread_name = f->R.rdi;
-			sys_fork (thread_name);
+			f->R.rax = sys_fork (thread_name, f);
 
 			break;	
 		}	
+		
+		case SYS_WAIT: {
+			f->R.rax = process_wait(f->R.rdi);
+			break;
+		}
+		
 		default:
 			break;
 	}
@@ -310,7 +316,6 @@ int sys_filesize (int fd) {
 	return result;
 }
 
-pid_t sys_fork (const char *thread_name) {
-	struct thread *current_thread = thread_current();
-	return process_fork(thread_name, &current_thread->tf);
+tid_t sys_fork (const char *thread_name, struct intr_frame *f) {	
+	return process_fork(thread_name, f);
 }
