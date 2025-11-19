@@ -35,8 +35,15 @@ static void
 process_init (void) {
 	struct thread *current = thread_current ();
 
-	for (int i = 0; i < 128; i++) {
-        current->fd_table[i] = NULL;
+	// [수정] 동적 할당 수행
+    // PAL_ZERO: 할당받은 페이지를 모두 0(NULL)으로 초기화해줌. for문 필요 없음.
+    current->fd_table = palloc_get_page(PAL_ZERO);
+
+    // [필수] 메모리 부족 시 예외 처리
+    if (current->fd_table == NULL) {
+        // 상황에 따라 thread_exit()을 하거나 호출부에서 처리
+        // 여기서는 일단 return; (호출하는 쪽에서 NULL 체크 권장)
+        return; 
     }
 }
 
@@ -272,14 +279,20 @@ process_exit (void) {
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
 
-	struct thread *current = thread_current();
-	struct file **fd_table = current->fd_table;
-	for (int i = 2; i < 128; i++) {
-		if (fd_table[i] != NULL) {
-			file_close(fd_table[i]);
-			fd_table[i] = NULL;
-		}
-	}
+	// 1. 열린 파일들 닫기 (기존 코드 유지)
+    // 주의: fd_table이 NULL일 수도 있으니 체크 먼저!
+    if (curr->fd_table != NULL) {
+        for (int i = 0; i < 128; i++) {
+            if (curr->fd_table[i] != NULL) {
+                file_close(curr->fd_table[i]);
+                curr->fd_table[i] = NULL;
+            }
+        }
+        
+        // [추가] 테이블 자체를 메모리 해제
+        palloc_free_page(curr->fd_table);
+        curr->fd_table = NULL; // 댕글링 포인터 방지
+    }
 
 	// if (current->fd_table != NULL) {
 	// 	palloc_free_page(current->fd_table);
