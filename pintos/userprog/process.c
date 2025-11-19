@@ -162,7 +162,7 @@ __do_fork (void *aux) {
 	 * TODO:       in include/filesys/file.h. Note that parent should not return
 	 * TODO:       from the fork() until this function successfully duplicates
 	 * TODO:       the resources of parent.*/
-
+	
 	process_init ();
 
 	/* Finally, switch to the newly created process. */
@@ -230,6 +230,21 @@ process_exit (void) {
 	 * TODO: Implement process termination message (see
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
+
+	struct thread *current = thread_current();
+	struct file **fd_table = current->fd_table;
+	for (int i = 2; i < 128; i++) {
+		if (fd_table[i] != NULL) {
+			file_close(fd_table[i]);
+			fd_table[i] = NULL;
+		}
+	}
+
+	// if (current->fd_table != NULL) {
+	// 	palloc_free_page(current->fd_table);
+	// 	current->fd_table = NULL;
+	// }
+
 	//args-none: exit(0)
 	printf("%s: exit(%d)\n", curr->name, curr->exit_status);
 	process_cleanup ();
