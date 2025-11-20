@@ -30,7 +30,11 @@ static bool load (const char *file_name, struct intr_frame *if_);
 static void initd (void *f_name);
 static void __do_fork (void *);
 
-static struct semaphore fork_sema;
+struct do_fork_aux {
+    struct thread *parent;
+    struct intr_frame *tf; // 부모의 유저 모드 레지스터 정보 (포인터)
+	struct semaphore *sema;
+};
 
 /* General process initializer for initd and other process. */
 static void
@@ -99,17 +103,33 @@ initd (void *f_name) {
  * TID_ERROR if the thread cannot be created. */
 tid_t
 process_fork (const char *name, struct intr_frame *if_) {
-	/* Clone current thread to new thread.*/
-	
-	struct thread *curr = thread_current();
-	memcpy(&curr->tf, if_, sizeof(struct intr_frame));
+    struct thread *curr = thread_current();
+	struct semaphore fork_sema;
+
+    /* [추가] 보조 구조체 생성 및 값 채우기 */
+    struct do_fork_aux *aux = malloc(sizeof(struct do_fork_aux));
+    if (aux == NULL) return TID_ERROR;
 
 	sema_init(&fork_sema, 0);
-	
-	tid_t result = thread_create (name, PRI_DEFAULT, __do_fork, curr);
-	sema_down(&fork_sema);
 
-	return result;
+    aux->parent = curr;
+    aux->tf = if_; // 스택에 있는 if_ 주소를 그대로 전달 (부모가 wait하므로 안전함)
+	aux->sema = &fork_sema;
+    
+    tid_t result = thread_create (name, PRI_DEFAULT, __do_fork, aux);
+    
+    if (result == TID_ERROR) {
+        free(aux); // 실패 시 해제
+        return TID_ERROR;
+    }
+
+    sema_down(&fork_sema);
+
+    // 자식이 aux를 다 썼을 테니 여기서 해제해도 되지만, 
+    // 보통 자식(__do_fork)에서 해제하게 하는 게 깔끔합니다.
+    // (여기서는 자식이 이미 복사했으므로 상관없음)
+
+    return result;
 }
 
 #ifndef VM
@@ -165,18 +185,19 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
 static void
 __do_fork (void *aux) {
 	struct intr_frame if_;
-	struct thread *parent = (struct thread *) aux;
-	struct thread *current = thread_current ();
+    struct do_fork_aux *fork_aux = (struct do_fork_aux *) aux;
+    struct thread *parent = fork_aux->parent;
+    struct intr_frame *parent_if = fork_aux->tf; 
+	struct semaphore *fork_sema = fork_aux->sema;
 
-	/* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
-	struct intr_frame *parent_if = &parent->tf;  // 인터럽트 프레임 넘겨준다.
-	bool succ = true;
+    struct thread *current = thread_current ();
+    bool succ = true;
 
-	/* 1. Read the cpu context to local stack. */
-	memcpy (&if_, parent_if, sizeof (struct intr_frame));
+    /* 1. Read the cpu context to local stack. */
+    memcpy (&if_, parent_if, sizeof (struct intr_frame));
+    if_.R.rax = 0; // 자식 리턴값 0 설정
 
-	// 자식 스레드의 반환값 레지스터 0으로 설정.
-	if_.R.rax = 0;
+
 
 	/* 2. Duplicate PT */
 	current->pml4 = pml4_create();
@@ -214,11 +235,13 @@ __do_fork (void *aux) {
 
 	/* Finally, switch to the newly created process. */
 	if (succ) {
-		sema_up(&fork_sema);
-		// printf("%d", if_.R.rax);
+		sema_up(fork_sema);
+   		free(fork_aux);
 		do_iret (&if_);
 	}
 error:
+	sema_up(fork_sema);
+   	free(fork_aux);
 	thread_exit ();
 }
 
@@ -334,7 +357,6 @@ process_exit (void) {
         curr->child_info->exit_status = curr->exit_status; 
         sema_up(&curr->child_info->sema);
     }
-	
 	process_cleanup ();
 }
 
@@ -447,8 +469,6 @@ static bool load (const char *cmd_line, struct intr_frame *if_) {
 	bool success = false;
 	int i;
 	
-
-
 	// ============================================================================================================
 
 	char *file_name;
@@ -473,9 +493,6 @@ static bool load (const char *cmd_line, struct intr_frame *if_) {
 		goto done;
 	}
 
-
-
-	
 	// ============================================================================================================
 
 	/* Allocate and activate page directory. */
@@ -581,7 +598,6 @@ static bool load (const char *cmd_line, struct intr_frame *if_) {
 	//8바이트 정렬하기
 	if_->rsp = if_->rsp & ~0x7;
 
-
 	// 스택에 배열 넣기 // 작은 주소부터 큰 주소로 쓰인다.
 	for (int i = count; i >= 0; i--) {
 		if_->rsp -= sizeof(address[i]);
@@ -589,7 +605,7 @@ static bool load (const char *cmd_line, struct intr_frame *if_) {
 		*((char **)(if_->rsp)) = address[i];  // 이중 포인터 꼭 써야함.
 	}
 
-		// 레지스터 설정하기
+	// 레지스터 설정하기
 	if_->R.rdi = count;
 	if_->R.rsi = if_->rsp;
 
@@ -606,6 +622,7 @@ done:
 	if (copy_cmd_line != NULL) {
 		palloc_free_page(copy_cmd_line);
 	}
+	
 	/* We arrive here whether the load is successful or not. */
 	file_close (file);
 	return success;
