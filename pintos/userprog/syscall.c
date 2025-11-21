@@ -24,6 +24,8 @@ void sys_close (int fd);
 int sys_read (int fd, void *buffer, unsigned size);
 int sys_filesize (int fd);
 tid_t sys_fork (const char *thread_name, struct intr_frame *f);
+int dup2(int oldfd, int newfd);
+
 // int exec (const char *cmd_line);
 // pid_t fork (const char *);
 // int wait (pid_t);
@@ -193,6 +195,10 @@ void syscall_handler (struct intr_frame *f UNUSED) {
 				file_seek(file, pos);
 			}	
 		}
+
+		case SYS_DUP2:
+			
+			break;
 		
 		default:
 			break;
@@ -330,4 +336,8 @@ int sys_filesize (int fd) {
 
 tid_t sys_fork (const char *thread_name, struct intr_frame *f) {	
 	return process_fork(thread_name, f);
+}
+
+int dup2(int oldfd, int newfd) {
+
 }

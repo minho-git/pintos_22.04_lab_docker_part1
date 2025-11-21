@@ -34,6 +34,7 @@ struct do_fork_aux {
     struct thread *parent;
     struct intr_frame *tf; // 부모의 유저 모드 레지스터 정보 (포인터)
 	struct semaphore *sema;
+	bool *succ;
 };
 
 /* General process initializer for initd and other process. */
@@ -105,6 +106,7 @@ tid_t
 process_fork (const char *name, struct intr_frame *if_) {
     struct thread *curr = thread_current();
 	struct semaphore fork_sema;
+	bool succ = false;
 
     struct do_fork_aux *aux = malloc(sizeof(struct do_fork_aux));
     if (aux == NULL) return TID_ERROR;
@@ -114,6 +116,7 @@ process_fork (const char *name, struct intr_frame *if_) {
     aux->parent = curr;
     aux->tf = if_; 
 	aux->sema = &fork_sema;
+	aux->succ = &succ;
     
     tid_t result = thread_create (name, PRI_DEFAULT, __do_fork, aux);
     
@@ -124,9 +127,11 @@ process_fork (const char *name, struct intr_frame *if_) {
 
     sema_down(&fork_sema);
 
-    // 자식이 aux를 다 썼을 테니 여기서 해제해도 되지만, 
-    // 보통 자식(__do_fork)에서 해제하게 하는 게 깔끔합니다.
-    // (여기서는 자식이 이미 복사했으므로 상관없음)
+
+
+	if (!succ) {
+        return TID_ERROR; 
+    }
 
     return result;
 }
@@ -188,6 +193,7 @@ __do_fork (void *aux) {
     struct thread *parent = fork_aux->parent;
     struct intr_frame *parent_if = fork_aux->tf; 
 	struct semaphore *fork_sema = fork_aux->sema;
+	bool *succ_ptr = fork_aux->succ; // [추가] 주소 꺼내기
 
     struct thread *current = thread_current ();
     bool succ = true;
@@ -232,12 +238,13 @@ __do_fork (void *aux) {
 
 	/* Finally, switch to the newly created process. */
 	if (succ) {
+		*succ_ptr = true; // [추가] 부모의 변수에 "성공했음" 표시 (True)
 		sema_up(fork_sema);
    		free(fork_aux);
 		do_iret (&if_);
 	}
 error:
-	current->exit_status = TID_ERROR;
+	// current->exit_status = TID_ERROR;
 
 	sema_up(fork_sema);
    	free(fork_aux);
