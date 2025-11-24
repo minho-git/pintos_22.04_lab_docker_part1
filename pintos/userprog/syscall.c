@@ -43,7 +43,7 @@ int dup2(int oldfd, int newfd);
 #define MSR_LSTAR 0xc0000082        /* Long mode SYSCALL target */
 #define MSR_SYSCALL_MASK 0xc0000084 /* Mask for the eflags */
 
-static struct lock file_create_look;
+struct lock file_create_look;
 
 void
 syscall_init (void) {
@@ -202,6 +202,23 @@ void syscall_handler (struct intr_frame *f UNUSED) {
             break; 
         }
 
+		case SYS_TELL: {
+			int fd = f->R.rdi;
+			if (fd < 2 || fd >= 512) {
+				f->R.rax = -1;
+				break;
+			}
+			lock_acquire(&file_create_look);
+			struct file *file = thread_current()->fd_table[fd];
+			if (file == NULL) {
+				f->R.rax = -1;
+			} else {
+				f->R.rax = file_tell(file);
+			}
+			lock_release(&file_create_look);
+			break;
+		}
+
         case SYS_DUP2: {
             int oldfd = f->R.rdi;
             int newfd = f->R.rsi;
@@ -218,24 +235,19 @@ void syscall_handler (struct intr_frame *f UNUSED) {
 }
 
 int sys_write (int fd, const void *buffer, unsigned size) {
-    if (size == 0) {
-        return 0; 
-    }
+    if (size == 0) return 0;
+    if (fd <= 0 || fd >= 512) return -1; // Cannot write to stdin or invalid FDs.
 
-    if (fd == 1) {
+    struct file *file_obj = thread_current()->fd_table[fd];
+
+    if (file_obj == NULL) {
+        // This fd is not a file. Assume it's a console output stream.
         putbuf(buffer, size);
         return size;
     }
 
-	struct thread *current = thread_current();
-	struct file *file = current->fd_table[fd];
-
-	if (file == NULL) {
-		return 0;
-	}
-
-	int result = file_write (file, buffer, size);
-    return result; 
+    // It's a file.
+    return file_write(file_obj, buffer, size);
 }
 
 void halt(void) {
@@ -352,31 +364,31 @@ tid_t sys_fork (const char *thread_name, struct intr_frame *f) {
 
 int dup2(int oldfd, int newfd) {
 
-	if (oldfd < 0 || oldfd > 512 || newfd < 0 || newfd > 512) {
+	if (oldfd < 0 || oldfd >= 512 || newfd < 0 || newfd >= 512) {
 		return -1;
 	}
-
-	struct file *old_file = thread_current()->fd_table[oldfd];
-	struct file *new_file = thread_current()->fd_table[newfd];
-	struct file **fd_table = thread_current()->fd_table;
-
-	if (old_file == NULL) {
-		return -1;
-	}
+    
+    struct file **fd_table = thread_current()->fd_table;
 
 	if (oldfd == newfd) {
 		return newfd;
 	}
 
+	struct file *old_file = fd_table[oldfd];
+	struct file *new_file = fd_table[newfd];
+
+	if (old_file == new_file) {
+		return newfd;
+	}
+
     if (new_file != NULL) {
         file_close(new_file);
-        fd_table[newfd] = NULL; 
     }
-	
-	fd_table[newfd] =  file_duplicate(thread_current()->fd_table[oldfd]);
 
-	if (fd_table[newfd] == NULL) {
-		return -1;
+	fd_table[newfd] = old_file;
+
+	if (old_file != NULL) {
+		file_dup(old_file);
 	}
 
 	return newfd;	 
